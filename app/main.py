@@ -67,7 +67,7 @@ TOOLS = [
     },
 ]
 
-SKILLDS_DIR = os.path.join(".claude", "skills")
+SKILLS_DIR = os.path.join(".claude", "skills")
 
 def parse_skill(path):
     with open(path) as f:

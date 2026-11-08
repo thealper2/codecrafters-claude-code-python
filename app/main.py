@@ -67,6 +67,34 @@ TOOLS = [
     },
 ]
 
+SKILLDS_DIR = os.path.join(".claude", "skills")
+
+def parse_skill(path):
+    with open(path) as f:
+        text = f.read()
+    meta = {}
+    body = text
+    if text.startswith("---"):
+        end = text.find("\n---", 3)
+        if end != -1:
+            for line in text[3:end].strip().splitlines():
+                if ":" in line:
+                    k, v = line.split(":", 1)
+                    meta[k.strip()] = v.strip().strip("\"'")
+            body = text[end + 4:].lstrip("\n")
+    return meta, body
+
+def load_skills():
+    skills = {}
+    if not os.path.isdir(SKILLS_DIR):
+        return skills
+    for name in sorted(os.listdir(SKILLS_DIR)):
+        path = os.path.join(SKILLS_DIR, name, "SKILL.md")
+        if os.path.isfile(path):
+            meta, body = parse_skill(path)
+            skills[name] = {"meta": meta, "body": body}
+    return skills
+
 def execute_tool(name, arguments):
     a = json.loads(arguments)
     if name == "Read":
@@ -97,7 +125,17 @@ def main():
 
     client = OpenAI(api_key=API_KEY, base_url=BASE_URL)
     
-    messages = [{"role": "user", "content": args.p}]
+    skills = load_skills()
+    messages = []
+    
+    if skills:
+        lines = ["- " + n + ": " + s["meta"].get("description", "") for n, s in skills.items()]
+        messages.append({
+            "role": "system",
+            "content": "You have access to the following skills:\n\n" + "\n".join(lines),
+        })
+    messages.append({"role": "user", "content": args.p})
+    
     while True:
         chat = client.chat.completions.create(
             model="anthropic/claude-haiku-4.5",

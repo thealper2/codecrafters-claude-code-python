@@ -134,7 +134,15 @@ def main():
             "role": "system",
             "content": "You have access to the following skills:\n\n" + "\n".join(lines),
         })
-    messages.append({"role": "user", "content": args.p})
+    
+    prompt = args.p
+    if prompt.startswith("/"):
+        name, _, rest = prompt[1:].partition(" ")
+        if name in skills:
+            prompt = skills[name]["body"].strip()
+            if rest.strip():
+                prompt += "\n\n" + rest.strip()
+    messages.append({"role": "user", "content": prompt})
     
     while True:
         chat = client.chat.completions.create(

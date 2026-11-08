@@ -13,7 +13,7 @@ from urllib.parse import urlparse, unquote
 API_KEY = os.getenv("OPENROUTER_API_KEY")
 CLIENT = None
 LSP = None
-LSP_OPENED = set()
+LSP_OPENED = {}
 LSP_TOOL = {
     "type": "function",
     "function": {
@@ -157,8 +157,32 @@ def lsp_open(path):
                 "text": text,
             }
         })
-        LSP_OPENED.add(uri)
+        LSP_OPENED[uri] = 1
     return uri
+
+
+def lsp_sync(path, text):
+    ext = os.path.splitext(path)[1]
+    if not LSP or ext not in LSP.extension_to_language:
+        return
+    uri = Path(path).as_uri()
+    if uri in LSP_OPENED:
+        version = LSP_OPENED[uri] + 1
+        LSP.notify("textDocument/didChange", {
+            "textDocument": {"uri": uri, "version": version},
+            "contentChanges": [{"text": text}],
+        })
+        LSP_OPENED[uri] = version
+    else:
+        LSP.notify("textDocument/didOpen", {
+            "textDocument": {
+                "uri": uri,
+                "languageId": LSP.extension_to_language[ext],
+                "version": 1,
+                "text": text,
+            }
+        })
+        LSP_OPENED[uri] = 1
 
 
 def uri_to_rel(uri):
@@ -219,6 +243,7 @@ def execute_tool(name, arguments):
             os.makedirs(d, exist_ok=True)
         with open(a["file_path"], "w") as f:
             f.write(a["content"])
+        lsp_sync(os.path.abspath(a["file_path"]), a["content"])
         return "Wrote " + a["file_path"]
     if name == "Bash":
         r = subprocess.run(a["command"], shell=True, capture_output=True, text=True)

@@ -16,6 +16,7 @@ LSP = None
 LSP_OPENED = {}
 LSP_CURSOR = 0
 LSP_SHOWN = {}
+LSP_PENDING = {}
 LSP_TOOL = {
     "type": "function",
     "function": {
@@ -148,6 +149,7 @@ def load_skills():
 def lsp_open(path):
     uri = Path(path).as_uri()
     if uri not in LSP_OPENED:
+        lsp_poll()
         with open(path) as f:
             text = f.read()
         ext = os.path.splitext(path)[1]
@@ -168,6 +170,7 @@ def lsp_sync(path, text):
     if not LSP or ext not in LSP.extension_to_language:
         return
     uri = Path(path).as_uri()
+    lsp_poll()
     if uri in LSP_OPENED:
         version = LSP_OPENED[uri] + 1
         LSP.notify("textDocument/didChange", {
@@ -191,11 +194,10 @@ def uri_to_rel(uri):
     return os.path.relpath(unquote(urlparse(uri).path))
 
 
-def lsp_new_diagnostics():
+def lsp_poll():
     global LSP_CURSOR
     res = LSP.notifications(after=LSP_CURSOR, timeout_ms=0)
     LSP_CURSOR = res.get("cursor", LSP_CURSOR)
-    fresh = {}
     for n in res.get("notifications", []):
         if n.get("method") != "textDocument/publishDiagnostics":
             continue
@@ -211,15 +213,20 @@ def lsp_new_diagnostics():
         shown = LSP_SHOWN.get(uri, set())
         new = [c for c in current if c not in shown]
         LSP_SHOWN[uri] = set(current)
-        fresh[uri] = [c for c in fresh.get(uri, []) if c in LSP_SHOWN[uri]] + new
+        LSP_PENDING[uri] = [c for c in LSP_PENDING.get(uri, []) if c in LSP_SHOWN[uri]] + new
+
+
+def lsp_new_diagnostics():
+    lsp_poll()
     lines = []
-    for uri, items in fresh.items():
+    for uri, items in LSP_PENDING.items():
         if not items:
             continue
         lines.append("")
         lines.append(uri_to_rel(uri) + ":")
         for line, ch, msg in items:
             lines.append("  [Line " + str(line) + ":" + str(ch) + "] " + msg)
+    LSP_PENDING.clear()
     if not lines:
         return ""
     return (

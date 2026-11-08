@@ -8,8 +8,9 @@ import re
 from openai import OpenAI
 
 API_KEY = os.getenv("OPENROUTER_API_KEY")
+CLIENT = None
+MODEL = "anthropic/claude-haiku-4.5"
 BASE_URL = os.getenv("OPENROUTER_BASE_URL", default="https://openrouter.ai/api/v1")
-
 TOOLS = [
     {
         "type": "function",
@@ -82,8 +83,8 @@ TOOLS = [
         },
     },
 ]
-
 SKILLS_DIR = os.path.join(".claude", "skills")
+
 
 def parse_skill(path):
     with open(path) as f:
@@ -100,6 +101,7 @@ def parse_skill(path):
             body = text[end + 4:].lstrip("\n")
     return meta, body
 
+
 def load_skills():
     skills = {}
     if not os.path.isdir(SKILLS_DIR):
@@ -110,6 +112,7 @@ def load_skills():
             meta, body = parse_skill(path)
             skills[name] = {"meta": meta, "body": body}
     return skills
+
 
 def execute_tool(name, arguments):
     a = json.loads(arguments)
@@ -139,8 +142,13 @@ def execute_tool(name, arguments):
             "Skill: " + sname + " (located at " + folder + ")\n"
             "Paths in the instructions below are relative to that folder.\n\n"
         )
-        return header + fill_skill(skills[sname]["body"].strip(), a.get("args", "") or "")
+        body = header + fill_skill(skills[sname]["body"].strip(), a.get("args", "") or "")
+        if skills[sname]["meta"].get("context") == "fork":
+            answer = run_agent([{"role": "user", "content": body}])
+            return "Skill " + sname + " ran in a separate context and returned: " + (answer or "")
+        return body
     return "Unknown tool: " + name
+
 
 def fill_skill(body, rest):
     argv = rest.split()
@@ -153,6 +161,35 @@ def fill_skill(body, rest):
         body += "\n\n" + rest
     return body
 
+
+def run_agent(messages):
+    while True:
+        chat = CLIENT.chat.completions.create(model=MODEL, messages=messages, tools=TOOLS)
+        if not chat.choices:
+            raise RuntimeError("no choices in response")
+        msg = chat.choices[0].message
+        if not msg.tool_calls:
+            return msg.content
+        messages.append({
+            "role": "assistant",
+            "content": msg.content,
+            "tool_calls": [
+                {
+                    "id": c.id,
+                    "type": "function",
+                    "function": {"name": c.function.name, "arguments": c.function.arguments},
+                }
+                for c in msg.tool_calls
+            ],
+        })
+        for c in msg.tool_calls:
+            try:
+                result = execute_tool(c.function.name, c.function.arguments)
+            except Exception as e:
+                result = "Error: " + type(e).__name__ + ": " + str(e)
+            messages.append({"role": "tool", "tool_call_id": c.id, "content": result})
+
+
 def main():
     p = argparse.ArgumentParser()
     p.add_argument("-p", required=True)
@@ -161,7 +198,8 @@ def main():
     if not API_KEY:
         raise RuntimeError("OPENROUTER_API_KEY is not set")
 
-    client = OpenAI(api_key=API_KEY, base_url=BASE_URL)
+    global CLIENT
+    CLIENT = OpenAI(api_key=API_KEY, base_url=BASE_URL)
     
     skills = load_skills()
     messages = []
@@ -194,40 +232,7 @@ def main():
     else:
         messages.append({"role": "user", "content": args.p})
     
-    while True:
-        chat = client.chat.completions.create(
-            model="anthropic/claude-haiku-4.5",
-            messages=messages,
-            tools=TOOLS,
-        )
-        if not chat.choices:
-            raise RuntimeError("no choices in response")
-        msg = chat.choices[0].message
-        if not msg.tool_calls:
-            print(msg.content)
-            break
-        messages.append({
-            "role": "assistant",
-            "content": msg.content,
-            "tool_calls": [
-                {
-                    "id": c.id,
-                    "type": "function",
-                    "function": {"name": c.function.name, "arguments": c.function.arguments},
-                }
-                for c in msg.tool_calls
-            ],
-        })
-        for c in msg.tool_calls:
-            try:
-                result = execute_tool(c.function.name, c.function.arguments)
-            except Exception as e:
-                result = "Error: " + type(e).__name__ + ": " + str(e)
-            messages.append({
-                "role": "tool",
-                "tool_call_id": c.id,
-                "content": result,
-            })
+    print(run_agent(messages))
 
 
 if __name__ == "__main__":

@@ -3,6 +3,7 @@ import os
 import sys
 import json
 import subprocess
+import re
 
 from openai import OpenAI
 
@@ -139,9 +140,17 @@ def main():
     if prompt.startswith("/"):
         name, _, rest = prompt[1:].partition(" ")
         if name in skills:
-            prompt = skills[name]["body"].strip()
-            if rest.strip():
-                prompt += "\n\n" + rest.strip()
+            rest = rest.strip()
+            argv = rest.split()
+            body = skills[name]["body"].strip()
+            pick = lambda m: argv[int(m.group(1))] if int(m.group(1)) < len(argv) else ""
+            has_ph = re.search(r"\$ARGUMENTS|\$\d+", body)
+            body = re.sub(r"\$ARGUMENTS\[(\d+)\]", pick, body)
+            body = body.replace("$ARGUMENTS", rest)
+            body = re.sub(r"\$(\d+)", pick, body)
+            if not has_ph and rest:
+                body += "\n\n" + rest
+            prompt = body
     messages.append({"role": "user", "content": prompt})
     
     while True:

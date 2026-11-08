@@ -191,10 +191,14 @@ def main():
             ],
         })
         for c in msg.tool_calls:
+            try:
+                result = execute_tool(c.function.name, c.function.arguments)
+            except Exception as e:
+                result = "Error: " + type(e).__name__ + ": " + str(e)
             messages.append({
                 "role": "tool",
                 "tool_call_id": c.id,
-                "content": execute_tool(c.function.name, c.function.arguments),
+                "content": result,
             })
 
 

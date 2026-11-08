@@ -7,10 +7,13 @@ import re
 
 from openai import OpenAI
 from app.lsp_client import LSPClient
+from pathlib import Path
+from urllib.parse import urlparse, unquote
 
 API_KEY = os.getenv("OPENROUTER_API_KEY")
 CLIENT = None
 LSP = None
+LSP_OPENED = set()
 LSP_TOOL = {
     "type": "function",
     "function": {
@@ -140,6 +143,38 @@ def load_skills():
     return skills
 
 
+def lsp_definition(a):
+    path = os.path.abspath(a["filePath"])
+    uri = Path(path).as_uri()
+    if uri not in LSP_OPENED:
+        with open(path) as f:
+            text = f.read()
+        ext = os.path.splitext(path)[1]
+        LSP.notify("textDocument/didOpen", {
+            "textDocument": {
+                "uri": uri,
+                "languageId": LSP.extension_to_language.get(ext, ""),
+                "version": 1,
+                "text": text,
+            }
+        })
+        LSP_OPENED.add(uri)
+    res = LSP.request("textDocument/definition", {
+        "textDocument": {"uri": uri},
+        "position": {"line": a["line"] - 1, "character": a["character"] - 1},
+    })
+    if isinstance(res, dict) and "result" in res:
+        res = res["result"]
+    if isinstance(res, list):
+        res = res[0] if res else None
+    if not res:
+        return "No definition found"
+    target = res.get("uri") or res.get("targetUri")
+    rng = res.get("range") or res.get("targetSelectionRange")
+    start = rng["start"]
+    rel = os.path.relpath(unquote(urlparse(target).path))
+    return "Defined in " + rel + ":" + str(start["line"] + 1) + ":" + str(start["character"] + 1)
+
 def execute_tool(name, arguments):
     a = json.loads(arguments)
     if name == "Read":
@@ -174,7 +209,9 @@ def execute_tool(name, arguments):
             return "Skill " + sname + " ran in a separate context and returned: " + (answer or "")
         return body
     if name == "LSP":
-        return "LSP is not implemented yet"
+        if a.get("operation") == "goToDefinition":
+            return lsp_definition(a)
+        return "Unsupported LSP operation: " + str(a.get("operation"))
     return "Unknown tool: " + name
 
 

@@ -25,7 +25,28 @@ TOOLS = [
                 "required": ["file_path"],
             },
         },
-    }
+    },
+    {
+        "type": "function",
+        "function": {
+            "name": "Write",
+            "description": "Write content to a file",
+            "parameters": {
+                "type": "object",
+                "required": ["file_path", "content"],
+                "properties": {
+                    "file_path": {
+                        "type": "string",
+                        "description": "The path of the file to write to",
+                    },
+                    "content": {
+                        "type": "string",
+                        "description": "The content to write to the file",
+                    },
+                },
+            },
+        },
+    },
 ]
 
 def execute_tool(name, arguments):
@@ -33,6 +54,13 @@ def execute_tool(name, arguments):
     if name == "Read":
         with open(a["file_path"]) as f:
             return f.read()
+    if name == "Write":
+        d = os.path.dirname(a["file_path"])
+        if d:
+            os.makedirs(d, exist_ok=True)
+        with open(a["file_path"], "w") as f:
+            f.write(a["content"])
+        return "Wrote " + a["file_path"]
     return "Unknown tool: " + name
 
 def main():

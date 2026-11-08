@@ -43,6 +43,8 @@ def main():
     if not API_KEY:
         raise RuntimeError("OPENROUTER_API_KEY is not set")
 
+    client = OpenAI(api_key=API_KEY, base_url=BASE_URL)
+    
     messages = [{"role": "user", "content": args.p}]
     while True:
         chat = client.chat.completions.create(

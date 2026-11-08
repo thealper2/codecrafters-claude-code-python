@@ -66,6 +66,21 @@ TOOLS = [
             },
         },
     },
+    {
+        "type": "function",
+        "function": {
+            "name": "Skill",
+            "description": "Load a skill's instructions into the conversation",
+            "parameters": {
+                "type": "object",
+                "required": ["name"],
+                "properties": {
+                    "name": {"type": "string", "description": "The name of the skill to use"},
+                    "args": {"type": "string", "description": "Optional arguments for the skill"},
+                },
+            },
+        },
+    },
 ]
 
 SKILLS_DIR = os.path.join(".claude", "skills")
@@ -114,6 +129,17 @@ def execute_tool(name, arguments):
         if r.returncode != 0:
             out += "\nExit code: " + str(r.returncode)
         return out or "(no output)"
+    if name == "Skill":
+        skills = load_skills()
+        sname = a["name"].lstrip("/")
+        if sname not in skills:
+            return "Unknown skill: " + sname
+        folder = os.path.join(SKILLS_DIR, sname)
+        header = (
+            "Skill: " + sname + " (located at " + folder + ")\n"
+            "Paths in the instructions below are relative to that folder.\n\n"
+        )
+        return header + fill_skill(skills[sname]["body"].strip(), a.get("args", "") or "")
     return "Unknown tool: " + name
 
 def fill_skill(body, rest):
@@ -144,7 +170,9 @@ def main():
         lines = ["- " + n + ": " + s["meta"].get("description", "") for n, s in skills.items()]
         messages.append({
             "role": "system",
-            "content": "You have access to the following skills:\n\n" + "\n".join(lines),
+            "content": "You have access to the following skills:\n\n" + "\n".join(lines)
+            + "\n\nIf a skill matches the user's request, call the Skill tool with its name"
+            " and follow the instructions it returns.",
         })
     
     tokens = args.p.split()

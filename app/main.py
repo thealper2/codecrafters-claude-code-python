@@ -1,6 +1,7 @@
 import argparse
 import os
 import sys
+import json
 
 from openai import OpenAI
 
@@ -46,9 +47,15 @@ def main():
     if not chat.choices or len(chat.choices) == 0:
         raise RuntimeError("no choices in response")
 
-    print("Logs from your program will appear here!", file=sys.stderr)
-
-    print(chat.choices[0].message.content)
+    msg = chat.choices[0].message
+    if msg.tool_calls:
+        call = msg.tool_calls[0]
+        args_ = json.loads(call.function.arguments)
+        if call.function.name == "Read":
+            with open(args_["file_path"]) as f:
+                print(f.read(), end="")
+    else:
+        print(msg.content)
 
 
 if __name__ == "__main__":

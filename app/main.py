@@ -14,6 +14,8 @@ API_KEY = os.getenv("OPENROUTER_API_KEY")
 CLIENT = None
 LSP = None
 LSP_OPENED = {}
+LSP_CURSOR = 0
+LSP_SHOWN = {}
 LSP_TOOL = {
     "type": "function",
     "function": {
@@ -189,6 +191,44 @@ def uri_to_rel(uri):
     return os.path.relpath(unquote(urlparse(uri).path))
 
 
+def lsp_new_diagnostics():
+    global LSP_CURSOR
+    res = LSP.notifications(after=LSP_CURSOR, timeout_ms=0)
+    LSP_CURSOR = res.get("cursor", LSP_CURSOR)
+    fresh = {}
+    for n in res.get("notifications", []):
+        if n.get("method") != "textDocument/publishDiagnostics":
+            continue
+        p = n["params"]
+        uri = p["uri"]
+        version = p.get("version")
+        if version is not None and uri in LSP_OPENED and version != LSP_OPENED[uri]:
+            continue
+        current = []
+        for d in p.get("diagnostics", []):
+            s = d["range"]["start"]
+            current.append((s["line"] + 1, s["character"] + 1, d["message"]))
+        shown = LSP_SHOWN.get(uri, set())
+        new = [c for c in current if c not in shown]
+        LSP_SHOWN[uri] = set(current)
+        fresh[uri] = [c for c in fresh.get(uri, []) if c in LSP_SHOWN[uri]] + new
+    lines = []
+    for uri, items in fresh.items():
+        if not items:
+            continue
+        lines.append("")
+        lines.append(uri_to_rel(uri) + ":")
+        for line, ch, msg in items:
+            lines.append("  [Line " + str(line) + ":" + str(ch) + "] " + msg)
+    if not lines:
+        return ""
+    return (
+        "\n\n<new-diagnostics>The following new diagnostic issues were detected. "
+        "Fix them with your tools if they relate to your edits:\n"
+        + "\n".join(lines) + "</new-diagnostics>"
+    )
+
+
 def lsp_references(a):
     uri = lsp_open(os.path.abspath(a["filePath"]))
     res = LSP.request("textDocument/references", {
@@ -291,6 +331,10 @@ def fill_skill(body, rest):
 
 def run_agent(messages, allow_skill=True):
     while True:
+        if LSP and messages and messages[-1].get("role") == "tool":
+            extra = lsp_new_diagnostics()
+            if extra:
+                messages[-1]["content"] += extra
         tools = [t for t in TOOLS if allow_skill or t["function"]["name"] != "Skill"]
         chat = CLIENT.chat.completions.create(
             model=MODEL,

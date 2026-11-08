@@ -28,6 +28,13 @@ TOOLS = [
     }
 ]
 
+def execute_tool(name, arguments):
+    a = json.loads(arguments)
+    if name == "Read":
+        with open(a["file_path"]) as f:
+            return f.read()
+    return "Unknown tool: " + name
+
 def main():
     p = argparse.ArgumentParser()
     p.add_argument("-p", required=True)
@@ -36,26 +43,37 @@ def main():
     if not API_KEY:
         raise RuntimeError("OPENROUTER_API_KEY is not set")
 
-    client = OpenAI(api_key=API_KEY, base_url=BASE_URL)
-
-    chat = client.chat.completions.create(
-        model="anthropic/claude-haiku-4.5",
-        messages=[{"role": "user", "content": args.p}],
-        tools=TOOLS,
-    )
-
-    if not chat.choices or len(chat.choices) == 0:
-        raise RuntimeError("no choices in response")
-
-    msg = chat.choices[0].message
-    if msg.tool_calls:
-        call = msg.tool_calls[0]
-        args_ = json.loads(call.function.arguments)
-        if call.function.name == "Read":
-            with open(args_["file_path"]) as f:
-                print(f.read(), end="")
-    else:
-        print(msg.content)
+    messages = [{"role": "user", "content": args.p}]
+    while True:
+        chat = client.chat.completions.create(
+            model="anthropic/claude-haiku-4.5",
+            messages=messages,
+            tools=TOOLS,
+        )
+        if not chat.choices:
+            raise RuntimeError("no choices in response")
+        msg = chat.choices[0].message
+        if not msg.tool_calls:
+            print(msg.content)
+            break
+        messages.append({
+            "role": "assistant",
+            "content": msg.content,
+            "tool_calls": [
+                {
+                    "id": c.id,
+                    "type": "function",
+                    "function": {"name": c.function.name, "arguments": c.function.arguments},
+                }
+                for c in msg.tool_calls
+            ],
+        })
+        for c in msg.tool_calls:
+            messages.append({
+                "role": "tool",
+                "tool_call_id": c.id,
+                "content": execute_tool(c.function.name, c.function.arguments),
+            })
 
 
 if __name__ == "__main__":

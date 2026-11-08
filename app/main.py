@@ -4,6 +4,7 @@ import sys
 import json
 import subprocess
 import re
+import time
 
 from openai import OpenAI
 from app.lsp_client import LSPClient
@@ -17,6 +18,7 @@ LSP_OPENED = {}
 LSP_CURSOR = 0
 LSP_SHOWN = {}
 LSP_PENDING = {}
+LSP_DIRTY = False
 LSP_TOOL = {
     "type": "function",
     "function": {
@@ -166,6 +168,7 @@ def lsp_open(path):
 
 
 def lsp_sync(path, text):
+    global LSP_DIRTY
     ext = os.path.splitext(path)[1]
     if not LSP or ext not in LSP.extension_to_language:
         return
@@ -188,15 +191,16 @@ def lsp_sync(path, text):
             }
         })
         LSP_OPENED[uri] = 1
+    LSP_DIRTY = True
 
 
 def uri_to_rel(uri):
     return os.path.relpath(unquote(urlparse(uri).path))
 
 
-def lsp_poll():
+def lsp_poll(timeout_ms=0):
     global LSP_CURSOR
-    res = LSP.notifications(after=LSP_CURSOR, timeout_ms=0)
+    res = LSP.notifications(after=LSP_CURSOR, timeout_ms=timeout_ms)
     LSP_CURSOR = res.get("cursor", LSP_CURSOR)
     for n in res.get("notifications", []):
         if n.get("method") != "textDocument/publishDiagnostics":
@@ -217,6 +221,15 @@ def lsp_poll():
 
 
 def lsp_new_diagnostics():
+    global LSP_DIRTY
+    if LSP_DIRTY:
+        deadline = time.time() + 2.0
+        while time.time() < deadline:
+            before = LSP_CURSOR
+            lsp_poll(timeout_ms=500)
+            if LSP_CURSOR == before:
+                break
+        LSP_DIRTY = False
     lsp_poll()
     lines = []
     for uri, items in LSP_PENDING.items():

@@ -6,9 +6,35 @@ import subprocess
 import re
 
 from openai import OpenAI
+from app.lsp_client import LSPClient
 
 API_KEY = os.getenv("OPENROUTER_API_KEY")
 CLIENT = None
+LSP = None
+LSP_TOOL = {
+    "type": "function",
+    "function": {
+        "name": "LSP",
+        "description": "Returns the file, line, and character where a symbol is defined. Line and character are 1-based.",
+        "parameters": {
+            "type": "object",
+            "properties": {
+                "operation": {"type": "string", "enum": ["goToDefinition"]},
+                "filePath": {
+                    "type": "string",
+                    "description": "Absolute path, or a path relative to the agent's current working directory.",
+                },
+                "line": {"type": "integer", "minimum": 1, "description": "1-based line number of the symbol."},
+                "character": {
+                    "type": "integer",
+                    "minimum": 1,
+                    "description": "1-based character offset in UTF-16 code units (same as character count for ASCII).",
+                },
+            },
+            "required": ["operation", "filePath", "line", "character"],
+        },
+    },
+}
 MODEL = "anthropic/claude-haiku-4.5"
 BASE_URL = os.getenv("OPENROUTER_BASE_URL", default="https://openrouter.ai/api/v1")
 TOOLS = [
@@ -147,6 +173,8 @@ def execute_tool(name, arguments):
             answer = run_agent([{"role": "user", "content": body}])
             return "Skill " + sname + " ran in a separate context and returned: " + (answer or "")
         return body
+    if name == "LSP":
+        return "LSP is not implemented yet"
     return "Unknown tool: " + name
 
 
@@ -164,7 +192,11 @@ def fill_skill(body, rest):
 
 def run_agent(messages):
     while True:
-        chat = CLIENT.chat.completions.create(model=MODEL, messages=messages, tools=TOOLS)
+        chat = CLIENT.chat.completions.create(
+            model=MODEL, 
+            messages=messages, 
+            tools=TOOLS + ([LSP_TOOL] if LSP else [])
+        )
         if not chat.choices:
             raise RuntimeError("no choices in response")
         msg = chat.choices[0].message
@@ -198,8 +230,11 @@ def main():
     if not API_KEY:
         raise RuntimeError("OPENROUTER_API_KEY is not set")
 
-    global CLIENT
+    global CLIENT, LSP
     CLIENT = OpenAI(api_key=API_KEY, base_url=BASE_URL)
+    LSP = LSPClient.from_environment()
+    if LSP:
+        print("LSP client connected", file=sys.stderr)
     
     skills = load_skills()
     messages = []

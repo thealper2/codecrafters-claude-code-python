@@ -147,7 +147,6 @@ def main():
             "content": "You have access to the following skills:\n\n" + "\n".join(lines),
         })
     
-    prompt = args.p
     if prompt.startswith("/"):
         name, _, rest = prompt[1:].partition(" ")
         if name in skills:
@@ -161,7 +160,6 @@ def main():
             body = re.sub(r"\$(\d+)", pick, body)
             if not has_ph and rest:
                 body += "\n\n" + rest
-            prompt = body
     
     tokens = args.p.split()
     invoked = []
@@ -172,7 +170,13 @@ def main():
     if invoked:
         rest = " ".join(tokens[i:])
         for name in invoked:
-            messages.append({"role": "user", "content": fill_skill(skills[name]["body"].strip(), rest)})
+            folder = os.path.join(SKILLS_DIR, name)
+            header = (
+                "Skill: " + name + " (located at " + folder + ")\n"
+                "Paths in the instructions below are relative to that folder.\n\n"
+            )
+            body = fill_skill(skills[name]["body"].strip(), rest)
+            messages.append({"role": "user", "content": header + body})
     else:
         messages.append({"role": "user", "content": args.p})
     

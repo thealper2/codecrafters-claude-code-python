@@ -116,6 +116,17 @@ def execute_tool(name, arguments):
         return out or "(no output)"
     return "Unknown tool: " + name
 
+def fill_skill(body, rest):
+    argv = rest.split()
+    pick = lambda m: argv[int(m.group(1))] if int(m.group(1)) < len(argv) else ""
+    has_ph = re.search(r"\$ARGUMENTS|\$\d+", body)
+    body = re.sub(r"\$ARGUMENTS\[(\d+)\]", pick, body)
+    body = body.replace("$ARGUMENTS", rest)
+    body = re.sub(r"\$(\d+)", pick, body)
+    if not has_ph and rest:
+        body += "\n\n" + rest
+    return body
+
 def main():
     p = argparse.ArgumentParser()
     p.add_argument("-p", required=True)
@@ -151,7 +162,19 @@ def main():
             if not has_ph and rest:
                 body += "\n\n" + rest
             prompt = body
-    messages.append({"role": "user", "content": prompt})
+    
+    tokens = args.p.split()
+    invoked = []
+    i = 0
+    while i < len(tokens) and tokens[i].startswith("/") and tokens[i][1:] in skills:
+        invoked.append(tokens[i][1:])
+        i += 1
+    if invoked:
+        rest = " ".join(tokens[i:])
+        for name in invoked:
+            messages.append({"role": "user", "content": fill_skill(skills[name]["body"].strip(), rest)})
+    else:
+        messages.append({"role": "user", "content": args.p})
     
     while True:
         chat = client.chat.completions.create(

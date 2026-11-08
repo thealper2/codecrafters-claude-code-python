@@ -263,6 +263,8 @@ def execute_tool(name, arguments):
         folder = os.path.join(SKILLS_DIR, sname)
         header = (
             "Skill: " + sname + " (located at " + folder + ")\n"
+            "This skill is already loaded; do not call the Skill tool for it. "
+            "Follow its instructions directly.\n"
             "Paths in the instructions below are relative to that folder.\n\n"
         )
         return header + filled
@@ -358,6 +360,8 @@ def main():
             folder = os.path.join(SKILLS_DIR, name)
             header = (
                 "Skill: " + name + " (located at " + folder + ")\n"
+                "This skill is already loaded; do not call the Skill tool for it. "
+                "Follow its instructions directly.\n"
                 "Paths in the instructions below are relative to that folder.\n\n"
             )
             body = fill_skill(skills[name]["body"].strip(), rest)

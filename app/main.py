@@ -256,16 +256,16 @@ def execute_tool(name, arguments):
         sname = a["name"].lstrip("/")
         if sname not in skills:
             return "Unknown skill: " + sname
+        filled = fill_skill(skills[sname]["body"].strip(), a.get("args", "") or "")
+        if skills[sname]["meta"].get("context") == "fork":
+            answer = run_agent([{"role": "user", "content": filled}], allow_skill=False)
+            return "Skill " + sname + " ran in a separate context and returned: " + (answer or "")
         folder = os.path.join(SKILLS_DIR, sname)
         header = (
             "Skill: " + sname + " (located at " + folder + ")\n"
             "Paths in the instructions below are relative to that folder.\n\n"
         )
-        body = header + fill_skill(skills[sname]["body"].strip(), a.get("args", "") or "")
-        if skills[sname]["meta"].get("context") == "fork":
-            answer = run_agent([{"role": "user", "content": body}])
-            return "Skill " + sname + " ran in a separate context and returned: " + (answer or "")
-        return body
+        return header + filled
     if name == "LSP":
         if a.get("operation") == "goToDefinition":
             return lsp_definition(a)
@@ -287,12 +287,13 @@ def fill_skill(body, rest):
     return body
 
 
-def run_agent(messages):
+def run_agent(messages, allow_skill=True):
     while True:
+        tools = [t for t in TOOLS if allow_skill or t["function"]["name"] != "Skill"]
         chat = CLIENT.chat.completions.create(
-            model=MODEL, 
-            messages=messages, 
-            tools=TOOLS + ([LSP_TOOL] if LSP else [])
+            model=MODEL,
+            messages=messages,
+            tools=tools + ([LSP_TOOL] if LSP else []),
         )
         if not chat.choices:
             raise RuntimeError("no choices in response")

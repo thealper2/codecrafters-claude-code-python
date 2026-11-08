@@ -18,11 +18,11 @@ LSP_TOOL = {
     "type": "function",
     "function": {
         "name": "LSP",
-        "description": "Returns the file, line, and character where a symbol is defined. Line and character are 1-based.",
+        "description": "Finds where a symbol is defined (goToDefinition) or all places it is used (findReferences). Line and character are 1-based.",
         "parameters": {
             "type": "object",
             "properties": {
-                "operation": {"type": "string", "enum": ["goToDefinition"]},
+                "operation": {"type": "string", "enum": ["goToDefinition", "findReferences"]},
                 "filePath": {
                     "type": "string",
                     "description": "Absolute path, or a path relative to the agent's current working directory.",
@@ -143,8 +143,7 @@ def load_skills():
     return skills
 
 
-def lsp_definition(a):
-    path = os.path.abspath(a["filePath"])
+def lsp_open(path):
     uri = Path(path).as_uri()
     if uri not in LSP_OPENED:
         with open(path) as f:
@@ -159,6 +158,40 @@ def lsp_definition(a):
             }
         })
         LSP_OPENED.add(uri)
+    return uri
+
+
+def uri_to_rel(uri):
+    return os.path.relpath(unquote(urlparse(uri).path))
+
+
+def lsp_references(a):
+    uri = lsp_open(os.path.abspath(a["filePath"]))
+    res = LSP.request("textDocument/references", {
+        "textDocument": {"uri": uri},
+        "position": {"line": a["line"] - 1, "character": a["character"] - 1},
+        "context": {"includeDeclaration": True},
+    })
+    if isinstance(res, dict) and "result" in res:
+        res = res["result"]
+    if not res:
+        return "No references found"
+    groups = {}
+    for loc in res:
+        s = loc["range"]["start"]
+        groups.setdefault(uri_to_rel(loc["uri"]), []).append(
+            "  Line " + str(s["line"] + 1) + ":" + str(s["character"] + 1)
+        )
+    out = ["Found " + str(len(res)) + " references across " + str(len(groups)) + " files:"]
+    for f, lines in groups.items():
+        out.append("")
+        out.append(f + ":")
+        out.extend(lines)
+    return "\n".join(out)
+
+
+def lsp_definition(a):
+    uri = lsp_open(os.path.abspath(a["filePath"]))
     res = LSP.request("textDocument/definition", {
         "textDocument": {"uri": uri},
         "position": {"line": a["line"] - 1, "character": a["character"] - 1},
@@ -172,7 +205,7 @@ def lsp_definition(a):
     target = res.get("uri") or res.get("targetUri")
     rng = res.get("range") or res.get("targetSelectionRange")
     start = rng["start"]
-    rel = os.path.relpath(unquote(urlparse(target).path))
+    rel = uri_to_rel(target)
     return "Defined in " + rel + ":" + str(start["line"] + 1) + ":" + str(start["character"] + 1)
 
 def execute_tool(name, arguments):
@@ -211,6 +244,8 @@ def execute_tool(name, arguments):
     if name == "LSP":
         if a.get("operation") == "goToDefinition":
             return lsp_definition(a)
+        if a.get("operation") == "findReferences":
+            return lsp_references(a)
         return "Unsupported LSP operation: " + str(a.get("operation"))
     return "Unknown tool: " + name
 
